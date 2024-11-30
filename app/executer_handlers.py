@@ -58,8 +58,8 @@ async def reminders():
             projects = await db.remember()
             # print(projects)
             for project_name, client_id in projects:
-                print(client_id)
-                print(project_name)
+                # print(client_id)
+                # print(project_name)
                 if count_days == 1:
                     await bot.send_message(
                         admin_id,
@@ -72,7 +72,7 @@ async def reminders():
                 )
 
             # await asyncio.sleep(86400)
-            await asyncio.sleep(400)
+            await asyncio.sleep(10)
             count_days -= 1
         if count_days == 0:
             await bot.send_message(int(client_id), text="Ваш срок согласования истек")
@@ -336,6 +336,6 @@ async def access_project(call: CallbackQuery):
 # -----------------------------------------КЛИЕНТСКАЯ СТОРОНА БОТА------------------------------------------- #
 
 
-async def generate_token():
+async def generate_token() -> str:
     """generate unique token"""
     return secrets.token_hex(16)
