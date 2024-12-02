@@ -4,7 +4,7 @@ from aiogram.types import (
     FSInputFile,
 )
 from aiogram import F, Router, Bot
-from aiogram.filters import CommandStart
+from aiogram.filters import CommandStart, Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 
@@ -13,22 +13,27 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 from app.cloud_manage import MailWevDAV
 
+from dotenv import *
+
 import datetime
 import asyncio
 import os
 import secrets
 
 from sql_method.sql import DataBase
-from config import *
+
+# from config import *
+
+config = dotenv_values(".env")
 
 router = Router()
-admin_id = int(admin_id)
+admin_id = int(config["admin_id"])
 stop_event = 0
 user_file = {}
 user_task = {}
 
-login = mail_login
-password = secret_pass
+login = config["mail_login"]
+password = config["secret_pass"]
 
 cloud = MailWevDAV(login, password)
 
@@ -38,44 +43,49 @@ if not os.path.exists(DOWNLOADS_FOLDER):
     os.makedirs(DOWNLOADS_FOLDER)
 
 db = DataBase("database.db")
-bot = Bot(token=TOKEN)
+bot = Bot(token=config["TELEGRAM_TOKEN"])
 
 
 class SendFiles(StatesGroup):
     wait_files = State()
     client_id = State()
+    client_name = State()
     project_name = State()
     file_name = State()
     file_path = State()
 
+
 class Token(StatesGroup):
     token_state = State()
 
+class Link(StatesGroup):
+    project_name = State()
+    link = State()
 
 async def reminders():
-        count_days = 3
-        while count_days > 0:
-            projects = await db.remember()
-            # print(projects)
-            for project_name, client_id in projects:
-                # print(client_id)
-                # print(project_name)
-                if count_days == 1:
-                    await bot.send_message(
-                        admin_id,
-                        text=f"У клиента осталось дней на согласовние: {count_days}",
-                    )
+    count_days = 3
+    while count_days > 0:
+        projects = await db.remember()
+        # print(projects)
+        for project_name, client_id in projects:
+            # print(client_id)
+            # print(project_name)
+            if count_days == 1:
                 await bot.send_message(
-                    int(client_id),
-                    f"Напоминание: проект {project_name} еще не согласован\n"
-                    f"Осталось дней до конца срока согласования: {count_days}",
+                    admin_id,
+                    text=f"У клиента осталось дней на согласовние: {count_days}",
                 )
+            await bot.send_message(
+                int(client_id),
+                f"Напоминание: проект {project_name} еще не согласован\n"
+                f"Осталось дней до конца срока согласования: {count_days}",
+            )
 
-            # await asyncio.sleep(86400)
-            await asyncio.sleep(10)
-            count_days -= 1
-        if count_days == 0:
-            await bot.send_message(int(client_id), text="Ваш срок согласования истек")
+        # await asyncio.sleep(86400)
+        await asyncio.sleep(10)
+        count_days -= 1
+    if count_days == 0:
+        await bot.send_message(int(client_id), text="Ваш срок согласования истек")
 
 
 async def generate_path(base_path="/downloads") -> str:
@@ -96,16 +106,22 @@ async def check_directory(remote_path):
             await cloud.create_dir(current_path)
 
 
-@router.message(CommandStart())
+@router.message(Command('test_button'))
+async def test(message: Message):
+    keyboard = InlineKeyboardBuilder()
+    button = InlineKeyboardButton(text='перейти в меню', callback_data='back_to_menu')
+    keyboard.add(button)
+    keyboard.adjust(1)
+
+    await message.answer('Перейти в меню', reply_markup=keyboard.as_markup())
+
+
+@router.message(CommandStart() or F.data == 'back_to_menu')
 async def start(message: Message, state: FSMContext):
+    print(config)
     global stop_event
     stop_event = 0
-    # if message.chat.username is None:
-    #     username = 'none'
-    # username = '@' + message.chat.username
     chat_id = message.chat.id
-    # print(f'ID: {username}')
-    # print(admin_id, type(admin_id))
 
     test = await cloud.test_connection()
     if test:
@@ -117,17 +133,15 @@ async def start(message: Message, state: FSMContext):
     # Если пользователь админ -> выводим его проекты
     if chat_id == admin_id:
         projects = await db.get_projects(f"{chat_id}")
-        print(projects)
         keyboard = InlineKeyboardBuilder()
         for project in projects:
             project_name = project[0]
-            print(project_name)
             client = await db.take_client_id(project_name)
             if client:
                 client_id = client[0]
             else:
                 client_id = None
-            print(client_id)
+
             button = InlineKeyboardButton(
                 text=f"{project_name}",
                 callback_data=f"selected_{project_name}_{client_id}",
@@ -139,9 +153,52 @@ async def start(message: Message, state: FSMContext):
     # Иначе выводим другое сообщение
 
     else:
-        await message.answer(f"Добро пожаловать.\nВставьте токен который прислал вам исполнитель")
+        await message.answer(
+            f"Добро пожаловать.\nВставьте токен который прислал вам исполнитель"
+        )
         await state.set_state(Token.token_state)
 
+@router.callback_query(F.data == 'back_to_menu')
+async def start(call: CallbackQuery, state: FSMContext):
+    print(config)
+    global stop_event
+    stop_event = 0
+    chat_id = call.message.chat.id
+
+    test = await cloud.test_connection()
+    if test:
+        await call.message.answer("Облако подключено")
+    else:
+        await call.message.answer("Ошибка подключения")
+        return
+
+    # Если пользователь админ -> выводим его проекты
+    if chat_id == admin_id:
+        projects = await db.get_projects(f"{chat_id}")
+        keyboard = InlineKeyboardBuilder()
+        for project in projects:
+            project_name = project[0]
+            client = await db.take_client_id(project_name)
+            if client:
+                client_id = client[0]
+            else:
+                client_id = None
+
+            button = InlineKeyboardButton(
+                text=f"{project_name}",
+                callback_data=f"selected_{project_name}_{client_id}",
+            )
+            # print(button)
+            keyboard.add(button)
+            keyboard.adjust(2)
+        await call.message.answer("Выберите проект:", reply_markup=keyboard.as_markup())
+    # Иначе выводим другое сообщение
+
+    else:
+        await call.message.answer(
+            f"Добро пожаловать.\nВставьте токен который прислал вам исполнитель"
+        )
+        await state.set_state(Token.token_state)
 
 @router.message(Token.token_state)
 async def take_token(message: Message, state: FSMContext):
@@ -152,31 +209,76 @@ async def take_token(message: Message, state: FSMContext):
     project = await db.take_project_name(token)
     project_name = project[0]
     if not len(token) == 32:
-        await message.answer('Неверный токен!\nПроверьте токен еще раз')
+        await message.answer("Неверный токен!\nПроверьте токен еще раз")
         return
     else:
         await db.confirm_user(token, chat_id, client_name)
         await db.add_to_project(chat_id, token)
-        await message.answer(f'Вы прикрелены к проекту: {project_name}')
+        await message.answer(f"Вы прикрелены к проекту: {project_name}")
+
+
+@router.callback_query(lambda call: call.data.startswith("create_token"))
+async def create_token(call: CallbackQuery):
+    project_name = call.data.split("_")[2]
+    await bot.answer_callback_query(call.id)
+    token = await generate_token()
+    await db.add_token(project_name, token)
+    await call.message.answer(
+        f"Токен для присоединения к проекту:\n<code>{token}</code>", parse_mode="HTML"
+    )
+
+
+@router.callback_query(lambda call: call.data.startswith("add_link"))
+async def add_link(call: CallbackQuery, state: FSMContext):
+    project_name = call.data.split("_")[2]
+    await bot.answer_callback_query(call.id)
+    await call.message.answer('отправьте боту ссылку на чат')
+    await state.set_state(Link.link)
+    await state.update_data(project_name=project_name)
+
+@router.message(Link.link)
+async def confirm_link(message: Message, state: FSMContext):
+    data = await state.get_data()
+    project_name = data['project_name']
+    link = message.text
+
+    keyboard = InlineKeyboardBuilder()
+    button = InlineKeyboardButton(text='Назад', callback_data='back_to_menu')
+    keyboard.add(button)
+    keyboard.adjust(1)
+
+    await db.add_link(link=link, project_name=project_name)
+    await message.answer('ссылка добавлена', reply_markup=keyboard.as_markup())
+
+
 
 
 @router.callback_query(lambda call: call.data.startswith("selected_"))
 async def send_files(call: CallbackQuery, state: FSMContext):
     await bot.answer_callback_query(call.id)
+
     info = call.data.split("_")
 
     print(info[1], info[2])
 
     project_name = info[1]
     user_id = info[2]
+    client = await db.take_client_name(user_id)
+    if client:
+        client_name = client[0]
 
     keyboard = InlineKeyboardBuilder()
-    button = InlineKeyboardButton(text="Создать токен", callback_data=f"create_token_{project_name}")
+    button = InlineKeyboardButton(
+        text="Создать токен", callback_data=f"create_token_{project_name}"
+    )
+    button_chat = InlineKeyboardButton(text='Добавить чат', callback_data=f'add_link_{project_name}')
     keyboard.add(button)
-    keyboard.adjust(1)
+    keyboard.add(button_chat)
+    keyboard.adjust(2)
     if user_id == "None":
         await call.message.answer(
-            "В данном проекте отстсвует чат айди клиента.\n Отправьте ему токен для подключения к проекту",
+            "В данном проекте отстсвует чат айди клиента или отсутсвует ссылка на чат.\n"
+            "Отправьте токен клиенту для подключения к проекту или добавьте ссылку на чат нажав по кнопке",
             reply_markup=keyboard.as_markup(),
         )
         return
@@ -185,17 +287,10 @@ async def send_files(call: CallbackQuery, state: FSMContext):
     await state.set_state(SendFiles.wait_files)
     await call.message.answer(
         f"вы выбрали проект: {project_name}\n"
-        f"Клиент: {user_id}\n"
+        f"Клиент: {client_name}\n"
         "Отправьте файлы которые хотите отправить клиенту"
     )
 
-@router.callback_query(lambda call: call.data.startswith("create_token"))
-async def create_token(call: CallbackQuery):
-    project_name = call.data.split('_')[2]
-    await bot.answer_callback_query(call.id)
-    token = await generate_token()
-    await db.add_token(project_name, token)
-    await call.message.answer(f'Токен для присоединения к проекту:\n<code>{token}</code>', parse_mode="HTML")
 
 @router.message(F.document | F.photo, SendFiles.wait_files)
 async def take_documents(message: Message, state: FSMContext):
@@ -298,8 +393,17 @@ async def send_files_to_client(call: CallbackQuery, state: FSMContext):
     user_task[client_id] = task
 
 
+# @router.message(Command('test_button_access'))
+# async def test(message: Message):
+#     keyboard = InlineKeyboardBuilder()
+#     button = InlineKeyboardButton(text='проверить подтверждение', callback_data='access_8034171996_проект лежанка')
+#     keyboard.add(button)
+#     keyboard.adjust(1)
+
+#     await message.answer('проверить подтверждение', reply_markup=keyboard.as_markup())
+
 @router.callback_query(
-    lambda call: call.data.startswith("access_") or call.data.startswith("rejection_")
+    lambda call: call.data.startswith("access") or call.data.startswith("rejection")
 )
 async def access_project(call: CallbackQuery):
     # await bot.answer_callback_query(call.id)

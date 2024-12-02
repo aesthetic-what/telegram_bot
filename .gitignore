@@ -2,3 +2,5 @@ __pycache__
 venv
 database.db
 downloads_images
+.env
+docker-compose.yml

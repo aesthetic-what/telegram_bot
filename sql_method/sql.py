@@ -19,12 +19,25 @@ class DataBase:
         """
         with self.connect:
             return self.cursor.execute(
-                """SELECT u.chat_id 
+                """SELECT u.chat_id
                     FROM users u 
                     JOIN projects p ON u.chat_id = p.client_id 
                     WHERE project_name = (?)""",
                 (project_name,),
             ).fetchone()
+
+    async def take_client_name(self, chat_id):
+        with self.connect:
+            return self.cursor.execute(
+                """SELECT name FROM users WHERE chat_id=(?)""", (chat_id,)
+            ).fetchone()
+
+    async def add_link(self, link, project_name):
+        with self.connect:
+            return self.cursor.execute(
+                """UPDATE projects SET group_chat=(?) WHERE project_name=(?)""",
+                (link, project_name, ),
+            )
 
     async def update_status(self, status, project_name):
         """Это функция для обновления статуса проекта"""
@@ -72,17 +85,19 @@ class DataBase:
                 return True
             else:
                 return False
+
     async def add_to_project(self, chat_id, token):
         with self.connect:
             project_name = self.cursor.execute(
                 """SELECT project_name FROM projects WHERE token=(?)""", (token,)
             ).fetchone()
             return self.cursor.execute(
-                    """UPDATE projects SET client_id=(SELECT chat_id FROM users WHERE chat_id=(?)) WHERE project_name=(?)""", (chat_id, project_name[0])
-                )
-        
+                """UPDATE projects SET client_id=(SELECT chat_id FROM users WHERE chat_id=(?)) WHERE project_name=(?)""",
+                (chat_id, project_name[0]),
+            )
+
     async def take_project_name(self, token):
         with self.connect:
             return self.cursor.execute(
-                """SELECT project_name FROM projects WHERE token=(?)""",(token, )
+                """SELECT project_name FROM projects WHERE token=(?)""", (token,)
             ).fetchone()
